@@ -1,12 +1,12 @@
 /**
- * Copyright 2010-2019 the original author or authors.
- *
+ * Copyright 2010-2016 the original author or authors.
+ * <p>
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * <p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,104 +15,89 @@
  */
 package org.mybatis.spring.config;
 
-import java.lang.annotation.Annotation;
-
-import org.mybatis.spring.mapper.MapperFactoryBean;
 import org.mybatis.spring.mapper.ClassPathMapperScanner;
-import org.mybatis.spring.mapper.MapperScannerConfigurer;
+import org.mybatis.spring.mapper.MapperFactoryBean;
 import org.springframework.beans.BeanUtils;
-import org.springframework.beans.factory.support.AbstractBeanDefinition;
-import org.springframework.beans.factory.support.BeanDefinitionBuilder;
+import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.beans.factory.support.BeanNameGenerator;
-import org.springframework.beans.factory.xml.AbstractBeanDefinitionParser;
+import org.springframework.beans.factory.xml.BeanDefinitionParser;
 import org.springframework.beans.factory.xml.ParserContext;
 import org.springframework.beans.factory.xml.XmlReaderContext;
-import org.springframework.util.ClassUtils;
+import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.util.StringUtils;
 import org.w3c.dom.Element;
 
+import java.lang.annotation.Annotation;
+
 /**
- * A {#code BeanDefinitionParser} that handles the element scan of the MyBatis. namespace
- * 
+ * A {#code BeanDefinitionParser} that handles the element scan of the MyBatis.
+ * namespace
+ *
  * @author Lishu Luo
  * @author Eduardo Macarron
  *
  * @since 1.2.0
  * @see MapperFactoryBean
  * @see ClassPathMapperScanner
- * @see MapperScannerConfigurer
  */
+public class MapperScannerBeanDefinitionParser implements BeanDefinitionParser {
 
-public class MapperScannerBeanDefinitionParser extends AbstractBeanDefinitionParser {
+    private static final String ATTRIBUTE_BASE_PACKAGE = "base-package";
+    private static final String ATTRIBUTE_ANNOTATION = "annotation";
+    private static final String ATTRIBUTE_MARKER_INTERFACE = "marker-interface";
+    private static final String ATTRIBUTE_NAME_GENERATOR = "name-generator";
+    private static final String ATTRIBUTE_TEMPLATE_REF = "template-ref";
+    private static final String ATTRIBUTE_FACTORY_REF = "factory-ref";
 
-  private static final String ATTRIBUTE_BASE_PACKAGE = "base-package";
-  private static final String ATTRIBUTE_ANNOTATION = "annotation";
-  private static final String ATTRIBUTE_MARKER_INTERFACE = "marker-interface";
-  private static final String ATTRIBUTE_NAME_GENERATOR = "name-generator";
-  private static final String ATTRIBUTE_TEMPLATE_REF = "template-ref";
-  private static final String ATTRIBUTE_FACTORY_REF = "factory-ref";
-  private static final String ATTRIBUTE_MAPPER_FACTORY_BEAN_CLASS = "mapper-factory-bean-class";
-  private static final String ATTRIBUTE_LAZY_INITIALIZATION = "lazy-initialization";
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public synchronized BeanDefinition parse(Element element, ParserContext parserContext) {
+        // 创建 ClassPathMapperScanner 对象
+        ClassPathMapperScanner scanner = new ClassPathMapperScanner(parserContext.getRegistry());
+        ClassLoader classLoader = scanner.getResourceLoader().getClassLoader();
+        XmlReaderContext readerContext = parserContext.getReaderContext();
+        scanner.setResourceLoader(readerContext.getResourceLoader()); // 设置 resourceLoader 属性
+        try {
+            // 解析 annotation 属性
+            String annotationClassName = element.getAttribute(ATTRIBUTE_ANNOTATION);
+            if (StringUtils.hasText(annotationClassName)) {
+                @SuppressWarnings("unchecked")
+                Class<? extends Annotation> markerInterface = (Class<? extends Annotation>) classLoader.loadClass(annotationClassName);
+                scanner.setAnnotationClass(markerInterface);
+            }
+            // 解析 marker-interface 属性
+            String markerInterfaceClassName = element.getAttribute(ATTRIBUTE_MARKER_INTERFACE);
+            if (StringUtils.hasText(markerInterfaceClassName)) {
+                Class<?> markerInterface = classLoader.loadClass(markerInterfaceClassName);
+                scanner.setMarkerInterface(markerInterface);
+            }
+            // 解析 name-generator 属性
+            String nameGeneratorClassName = element.getAttribute(ATTRIBUTE_NAME_GENERATOR);
+            if (StringUtils.hasText(nameGeneratorClassName)) {
+                Class<?> nameGeneratorClass = classLoader.loadClass(nameGeneratorClassName);
+                BeanNameGenerator nameGenerator = BeanUtils.instantiateClass(nameGeneratorClass, BeanNameGenerator.class);
+                scanner.setBeanNameGenerator(nameGenerator);
+            }
+        } catch (Exception ex) {
+            readerContext.error(ex.getMessage(), readerContext.extractSource(element), ex.getCause());
+        }
+        // 解析 template-ref 属性
+        String sqlSessionTemplateBeanName = element.getAttribute(ATTRIBUTE_TEMPLATE_REF);
+        scanner.setSqlSessionTemplateBeanName(sqlSessionTemplateBeanName);
+        // 解析 factory-ref 属性
+        String sqlSessionFactoryBeanName = element.getAttribute(ATTRIBUTE_FACTORY_REF);
+        scanner.setSqlSessionFactoryBeanName(sqlSessionFactoryBeanName);
 
-  /**
-   * {@inheritDoc}
-   * 
-   * @since 2.0.2
-   */
-  @Override
-  protected AbstractBeanDefinition parseInternal(Element element, ParserContext parserContext) {
-    BeanDefinitionBuilder builder = BeanDefinitionBuilder.genericBeanDefinition(MapperScannerConfigurer.class);
+        // 注册 scanner 的过滤器
+        scanner.registerFilters();
 
-    ClassLoader classLoader = ClassUtils.getDefaultClassLoader();
-
-    builder.addPropertyValue("processPropertyPlaceHolders", true);
-    try {
-      String annotationClassName = element.getAttribute(ATTRIBUTE_ANNOTATION);
-      if (StringUtils.hasText(annotationClassName)) {
-        @SuppressWarnings("unchecked")
-        Class<? extends Annotation> annotationClass = (Class<? extends Annotation>) classLoader
-            .loadClass(annotationClassName);
-        builder.addPropertyValue("annotationClass", annotationClass);
-      }
-      String markerInterfaceClassName = element.getAttribute(ATTRIBUTE_MARKER_INTERFACE);
-      if (StringUtils.hasText(markerInterfaceClassName)) {
-        Class<?> markerInterface = classLoader.loadClass(markerInterfaceClassName);
-        builder.addPropertyValue("markerInterface", markerInterface);
-      }
-      String nameGeneratorClassName = element.getAttribute(ATTRIBUTE_NAME_GENERATOR);
-      if (StringUtils.hasText(nameGeneratorClassName)) {
-        Class<?> nameGeneratorClass = classLoader.loadClass(nameGeneratorClassName);
-        BeanNameGenerator nameGenerator = BeanUtils.instantiateClass(nameGeneratorClass, BeanNameGenerator.class);
-        builder.addPropertyValue("nameGenerator", nameGenerator);
-      }
-      String mapperFactoryBeanClassName = element.getAttribute(ATTRIBUTE_MAPPER_FACTORY_BEAN_CLASS);
-      if (StringUtils.hasText(mapperFactoryBeanClassName)) {
-        @SuppressWarnings("unchecked")
-        Class<? extends MapperFactoryBean> mapperFactoryBeanClass = (Class<? extends MapperFactoryBean>) classLoader
-            .loadClass(mapperFactoryBeanClassName);
-        builder.addPropertyValue("mapperFactoryBeanClass", mapperFactoryBeanClass);
-      }
-    } catch (Exception ex) {
-      XmlReaderContext readerContext = parserContext.getReaderContext();
-      readerContext.error(ex.getMessage(), readerContext.extractSource(element), ex.getCause());
+        // 获得要扫描的包
+        String basePackage = element.getAttribute(ATTRIBUTE_BASE_PACKAGE);
+        // 执行扫描
+        scanner.scan(StringUtils.tokenizeToStringArray(basePackage, ConfigurableApplicationContext.CONFIG_LOCATION_DELIMITERS));
+        return null;
     }
-
-    builder.addPropertyValue("sqlSessionTemplateBeanName", element.getAttribute(ATTRIBUTE_TEMPLATE_REF));
-    builder.addPropertyValue("sqlSessionFactoryBeanName", element.getAttribute(ATTRIBUTE_FACTORY_REF));
-    builder.addPropertyValue("lazyInitialization", element.getAttribute(ATTRIBUTE_LAZY_INITIALIZATION));
-    builder.addPropertyValue("basePackage", element.getAttribute(ATTRIBUTE_BASE_PACKAGE));
-
-    return builder.getBeanDefinition();
-  }
-
-  /**
-   * {@inheritDoc}
-   * 
-   * @since 2.0.2
-   */
-  @Override
-  protected boolean shouldGenerateIdAsFallback() {
-    return true;
-  }
 
 }
